@@ -3,7 +3,9 @@ from app.core.models import UserProfile, AllocationResult
 GOLD_PCT = 7.5  # fixed, within the 5-10% band
 
 
-def suggest_allocation(profile: UserProfile) -> AllocationResult:
+def suggest_allocation(
+    profile: UserProfile, savings_rate_override: float | None = None
+) -> AllocationResult:
     reasoning: list[str] = []
 
     # 1. Emergency fund check
@@ -22,11 +24,14 @@ def suggest_allocation(profile: UserProfile) -> AllocationResult:
     )
 
     # 3. Adjust by savings rate
-    savings_rate = 0.0
-    if profile.monthly_income > 0:
-        savings_rate = (
-            profile.monthly_income - profile.monthly_expenses
-        ) / profile.monthly_income
+    if savings_rate_override is not None:
+        savings_rate = savings_rate_override
+    else:
+        savings_rate = 0.0
+        if profile.monthly_income > 0:
+            savings_rate = (
+                profile.monthly_income - profile.monthly_expenses
+            ) / profile.monthly_income
 
     equity_pct = base_equity
     if savings_rate >= 0.4:
