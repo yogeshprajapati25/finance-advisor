@@ -15,3 +15,14 @@ class AllocationResult(BaseModel):
     gold_pct: float
     fd_pct: float
     reasoning: list[str]
+
+class Transaction(BaseModel):
+    category: str
+    amount: float
+    description: str = ""
+
+
+class SpendingSummary(BaseModel):
+    total_expenses: float
+    category_breakdown: dict[str, float]
+    savings_rate: float
