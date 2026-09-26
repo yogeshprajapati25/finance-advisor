@@ -1,3 +1,5 @@
+from app.db.models import IncomeSourceDB
+from app.core.models import IncomeSource
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -15,6 +17,7 @@ from app.core.security import hash_password, verify_password, create_access_toke
 from app.core.security import get_current_user
 from app.db.models import TransactionDB
 from app.core.models import Transaction as TransactionSchema
+from datetime import datetime
 
 
 from app.db.database import engine, Base
@@ -147,3 +150,87 @@ def recommend_from_transactions(
     return suggest_allocation(
         request.profile, savings_rate_override=summary.savings_rate
     )
+
+
+def current_month_str() -> str:
+    return datetime.utcnow().strftime("%Y-%m")
+
+
+@app.post("/income")
+def add_income(
+    income: IncomeSource,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    new_income = IncomeSourceDB(
+        name=income.name,
+        amount=income.amount,
+        month=income.month or current_month_str(),
+        user_id=current_user.id,
+    )
+    db.add(new_income)
+    db.commit()
+    db.refresh(new_income)
+    return {
+        "id": new_income.id,
+        "name": new_income.name,
+        "amount": new_income.amount,
+        "month": new_income.month,
+    }
+
+
+@app.get("/income")
+def list_income(
+    month: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    query = db.query(IncomeSourceDB).filter(IncomeSourceDB.user_id == current_user.id)
+    if month:
+        query = query.filter(IncomeSourceDB.month == month)
+    sources = query.all()
+    return [
+        {"id": s.id, "name": s.name, "amount": s.amount, "month": s.month}
+        for s in sources
+    ]
+
+
+@app.put("/income/{income_id}")
+def update_income(
+    income_id: int,
+    income: IncomeSource,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    existing = (
+        db.query(IncomeSourceDB)
+        .filter(IncomeSourceDB.id == income_id, IncomeSourceDB.user_id == current_user.id)
+        .first()
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Income source not found")
+
+    existing.name = income.name
+    existing.amount = income.amount
+    existing.month = income.month or existing.month
+    db.commit()
+    return {"message": "Updated"}
+
+
+@app.delete("/income/{income_id}")
+def delete_income(
+    income_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    existing = (
+        db.query(IncomeSourceDB)
+        .filter(IncomeSourceDB.id == income_id, IncomeSourceDB.user_id == current_user.id)
+        .first()
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Income source not found")
+
+    db.delete(existing)
+    db.commit()
+    return {"message": "Deleted"}
