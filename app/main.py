@@ -153,23 +153,40 @@ def recommend(profile: UserProfile) -> AllocationResult:
 
 @app.get("/recommend", response_model=AllocationResult)
 def recommend_for_user(
+    month: str | None = None,
     db: Session = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
+    if not current_user.profile_complete:
+        raise HTTPException(
+            status_code=400,
+            detail="Please complete your profile before requesting a recommendation.",
+        )
+
+    target_month = month or current_month_str()
+
     txns = (
         db.query(TransactionDB)
-        .filter(TransactionDB.user_id == current_user.id)
+        .filter(TransactionDB.user_id == current_user.id, TransactionDB.month == target_month)
         .all()
     )
     txn_schemas = [
         TransactionSchema(category=t.category, amount=t.amount, description=t.description)
         for t in txns
     ]
-    summary = calculate_spending_summary(txn_schemas, current_user.monthly_income)
+
+    income_sources = (
+        db.query(IncomeSourceDB)
+        .filter(IncomeSourceDB.user_id == current_user.id, IncomeSourceDB.month == target_month)
+        .all()
+    )
+    total_income = sum(i.amount for i in income_sources)
+
+    summary = calculate_spending_summary(txn_schemas, total_income)
 
     profile = UserProfile(
         age=current_user.age,
-        monthly_income=current_user.monthly_income,
+        monthly_income=total_income,
         monthly_expenses=summary.total_expenses,
         dependents=current_user.dependents,
         has_emergency_fund=current_user.has_emergency_fund,
