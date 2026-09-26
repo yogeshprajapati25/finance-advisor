@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login - Finance Advisor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="card">
+    <h1>Log in</h1>
+    <div class="error" id="error"></div>
+    <input id="email" type="email" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
+    <button onclick="login()">Log In</button>
+    <div class="link">No account? <a href="/static/signup.html">Sign up</a></div>
+  </div>
+
+  <script>
+    async function login() {
+      const body = {
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value
+      };
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        document.getElementById('error').innerText = data.detail || 'Login failed';
+        return;
+      }
+      localStorage.setItem('token', data.access_token);
+      window.location.href = '/static/dashboard.html';
+    }
+  </script>
+</body>
+</html>

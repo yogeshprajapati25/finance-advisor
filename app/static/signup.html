@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Sign Up - Finance Advisor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="card">
+    <h1>Create your account</h1>
+    <div class="error" id="error"></div>
+    <input id="email" type="email" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
+    <input id="age" type="number" placeholder="Age">
+    <input id="income" type="number" placeholder="Monthly Income">
+    <input id="dependents" type="number" placeholder="Dependents" value="0">
+    <select id="emergency">
+      <option value="true">Has emergency fund</option>
+      <option value="false">No emergency fund</option>
+    </select>
+    <button onclick="signup()">Sign Up</button>
+    <div class="link">Already have an account? <a href="/static/login.html">Log in</a></div>
+  </div>
+
+  <script>
+    async function signup() {
+      const body = {
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+        age: parseInt(document.getElementById('age').value),
+        monthly_income: parseFloat(document.getElementById('income').value),
+        dependents: parseInt(document.getElementById('dependents').value),
+        has_emergency_fund: document.getElementById('emergency').value === 'true'
+      };
+      const res = await fetch('/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        document.getElementById('error').innerText = data.detail || 'Signup failed';
+        return;
+      }
+      localStorage.setItem('token', data.access_token);
+      window.location.href = '/static/dashboard.html';
+    }
+  </script>
+</body>
+</html>

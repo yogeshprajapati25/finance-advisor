@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dashboard - Finance Advisor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="card dashboard">
+    <span class="logout" onclick="logout()">Log out</span>
+    <h1>Your Finance Dashboard</h1>
+
+    <div class="section">
+      <h3>Add a transaction</h3>
+      <div class="row">
+        <input id="category" placeholder="Category (e.g. Rent)">
+        <input id="amount" type="number" placeholder="Amount">
+        <button style="width:auto; padding:10px 16px;" onclick="addTransaction()">Add</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Your transactions</h3>
+      <ul class="txn-list" id="txnList"></ul>
+    </div>
+
+    <div class="section">
+      <h3>Your recommended allocation</h3>
+      <div class="allocation-bar" id="allocationBar"></div>
+      <div class="legend">
+        <span><span class="dot" style="background:#4f46e5"></span>Equity: <b id="eqVal"></b></span>
+        <span><span class="dot" style="background:#06b6d4"></span>Debt: <b id="debtVal"></b></span>
+        <span><span class="dot" style="background:#f59e0b"></span>Gold: <b id="goldVal"></b></span>
+        <span><span class="dot" style="background:#10b981"></span>FD: <b id="fdVal"></b></span>
+      </div>
+      <ul class="reasoning" id="reasoningList"></ul>
+    </div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = '/static/login.html';
+
+    function authHeaders() {
+      return {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    function logout() {
+      localStorage.removeItem('token');
+      window.location.href = '/static/login.html';
+    }
+
+    async function addTransaction() {
+      const category = document.getElementById('category').value;
+      const amount = parseFloat(document.getElementById('amount').value);
+      if (!category || !amount) return;
+
+      const res = await fetch('/transactions', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ category, amount })
+      });
+      if (res.status === 401) return logout();
+
+      document.getElementById('category').value = '';
+      document.getElementById('amount').value = '';
+      loadTransactions();
+      loadRecommendation();
+    }
+
+    async function loadTransactions() {
+      const res = await fetch('/transactions', { headers: authHeaders() });
+      if (res.status === 401) return logout();
+      const txns = await res.json();
+
+      const list = document.getElementById('txnList');
+      list.innerHTML = '';
+      txns.forEach(t => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${t.category}</span><span>₹${t.amount}</span>`;
+        list.appendChild(li);
+      });
+    }
+
+    async function loadRecommendation() {
+      const res = await fetch('/recommend', { headers: authHeaders() });
+      if (res.status === 401) return logout();
+      const data = await res.json();
+
+      document.getElementById('eqVal').innerText = data.equity_pct + '%';
+      document.getElementById('debtVal').innerText = data.debt_pct + '%';
+      document.getElementById('goldVal').innerText = data.gold_pct + '%';
+      document.getElementById('fdVal').innerText = data.fd_pct + '%';
+
+      const bar = document.getElementById('allocationBar');
+      bar.innerHTML = `
+        <div class="eq" style="width:${data.equity_pct}%"></div>
+        <div class="debt" style="width:${data.debt_pct}%"></div>
+        <div class="gold" style="width:${data.gold_pct}%"></div>
+        <div class="fd" style="width:${data.fd_pct}%"></div>
+      `;
+
+      const reasoningList = document.getElementById('reasoningList');
+      reasoningList.innerHTML = '';
+      data.reasoning.forEach(r => {
+        const li = document.createElement('li');
+        li.innerText = r;
+        reasoningList.appendChild(li);
+      });
+    }
+
+    loadTransactions();
+    loadRecommendation();
+  </script>
+</body>
+</html>

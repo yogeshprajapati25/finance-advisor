@@ -22,6 +22,10 @@ from app.db import models as db_models
 
 app = FastAPI(title="Personal Finance Advisor")
 
+from fastapi.staticfiles import StaticFiles
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 Base.metadata.create_all(bind=engine)
 
 @app.post("/signup", response_model=Token)
