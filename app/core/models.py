@@ -16,6 +16,7 @@ class AllocationResult(BaseModel):
     fd_pct: float
     reasoning: list[str]
 
+
 class Transaction(BaseModel):
     category: str
     amount: float
@@ -31,10 +32,6 @@ class SpendingSummary(BaseModel):
 class UserSignup(BaseModel):
     email: str
     password: str
-    age: int
-    dependents: int = 0
-    has_emergency_fund: bool = False
-    monthly_income: float = 0.0
 
 
 class UserLogin(BaseModel):
@@ -45,3 +42,15 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class IncomeSource(BaseModel):
+    name: str
+    amount: float
+    month: str | None = None
+
+
+class ProfileUpdate(BaseModel):
+    age: int
+    dependents: int = 0
+    has_emergency_fund: bool = False

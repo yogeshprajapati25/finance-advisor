@@ -37,10 +37,6 @@ def signup(user: UserSignup, db: Session = Depends(get_db)):
     new_user = UserDB(
         email=user.email,
         hashed_password=hash_password(user.password),
-        age=user.age,
-        dependents=user.dependents,
-        has_emergency_fund=user.has_emergency_fund,
-        monthly_income=user.monthly_income,
     )
     db.add(new_user)
     db.commit()
