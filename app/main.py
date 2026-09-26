@@ -12,6 +12,10 @@ from app.db.models import UserDB
 from app.core.models import UserSignup, UserLogin, Token
 from app.core.security import hash_password, verify_password, create_access_token
 
+from app.core.security import get_current_user
+from app.db.models import TransactionDB
+from app.core.models import Transaction as TransactionSchema
+
 
 from app.db.database import engine, Base
 from app.db import models as db_models
@@ -54,9 +58,73 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
     token = create_access_token({"sub": str(user.id)})
     return Token(access_token=token)
 
+@app.post("/transactions")
+def add_transaction(
+    txn: TransactionSchema,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    new_txn = TransactionDB(
+        category=txn.category,
+        amount=txn.amount,
+        description=txn.description,
+        user_id=current_user.id,
+    )
+    db.add(new_txn)
+    db.commit()
+    db.refresh(new_txn)
+    return {"id": new_txn.id, "message": "Transaction added"}
+
+
+@app.get("/transactions")
+def get_transactions(
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    txns = (
+        db.query(TransactionDB)
+        .filter(TransactionDB.user_id == current_user.id)
+        .all()
+    )
+    return [
+        {
+            "id": t.id,
+            "category": t.category,
+            "amount": t.amount,
+            "description": t.description,
+        }
+        for t in txns
+    ]
+
+
 @app.post("/recommend", response_model=AllocationResult)
 def recommend(profile: UserProfile) -> AllocationResult:
     return suggest_allocation(profile)
+
+@app.get("/recommend", response_model=AllocationResult)
+def recommend_for_user(
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    txns = (
+        db.query(TransactionDB)
+        .filter(TransactionDB.user_id == current_user.id)
+        .all()
+    )
+    txn_schemas = [
+        TransactionSchema(category=t.category, amount=t.amount, description=t.description)
+        for t in txns
+    ]
+    summary = calculate_spending_summary(txn_schemas, current_user.monthly_income)
+
+    profile = UserProfile(
+        age=current_user.age,
+        monthly_income=current_user.monthly_income,
+        monthly_expenses=summary.total_expenses,
+        dependents=current_user.dependents,
+        has_emergency_fund=current_user.has_emergency_fund,
+    )
+    return suggest_allocation(profile, savings_rate_override=summary.savings_rate)
 
 
 @app.get("/health")
