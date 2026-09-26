@@ -7,6 +7,11 @@ from app.core.spending import calculate_spending_summary
 
 app = FastAPI(title="Personal Finance Advisor")
 
+from app.db.database import engine, Base
+from app.db import models as db_models
+
+Base.metadata.create_all(bind=engine)
+
 
 @app.post("/recommend", response_model=AllocationResult)
 def recommend(profile: UserProfile) -> AllocationResult:
