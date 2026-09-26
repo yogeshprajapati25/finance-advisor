@@ -26,3 +26,22 @@ class SpendingSummary(BaseModel):
     total_expenses: float
     category_breakdown: dict[str, float]
     savings_rate: float
+
+
+class UserSignup(BaseModel):
+    email: str
+    password: str
+    age: int
+    dependents: int = 0
+    has_emergency_fund: bool = False
+    monthly_income: float = 0.0
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
