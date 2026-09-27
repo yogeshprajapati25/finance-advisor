@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Profile — Finance Advisor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand">Finance Advisor</div>
+      <nav>
+        <a href="/static/dashboard.html">Dashboard</a>
+        <a href="/static/profile.html" class="active">My Profile</a>
+      </nav>
+      <div class="logout" onclick="logout()">Log out</div>
+    </div>
+
+    <div class="main">
+      <div class="greeting">Your details</div>
+      <h1>My Profile</h1>
+
+      <!-- Basic profile info -->
+      <div class="panel">
+        <div class="panel-head"><h3>About you</h3></div>
+        <div class="add-row">
+          <input id="age" type="number" placeholder="Age">
+          <input id="dependents" type="number" placeholder="Dependents">
+          <select id="emergency">
+            <option value="true">Has emergency fund</option>
+            <option value="false">No emergency fund</option>
+          </select>
+          <button onclick="saveProfile()">Save</button>
+        </div>
+        <div class="error" id="profileMsg"></div>
+      </div>
+
+      <!-- Income sources -->
+      <div class="panel">
+        <div class="panel-head"><h3>Income sources (this month)</h3></div>
+        <div class="add-row">
+          <input id="incomeName" placeholder="Source (e.g. Salary)">
+          <input id="incomeAmount" type="number" placeholder="Amount (₹)">
+          <button onclick="addIncome()">Add</button>
+        </div>
+        <table>
+          <thead><tr><th>Source</th><th>Amount</th><th></th></tr></thead>
+          <tbody id="incomeBody">
+            <tr><td colspan="3" class="empty-state">No income sources yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Transactions -->
+      <div class="panel">
+        <div class="panel-head"><h3>Transactions (this month)</h3></div>
+        <div class="add-row">
+          <select id="category">
+            <option>Rent</option>
+            <option>Food</option>
+            <option>Travel</option>
+            <option>Shopping</option>
+            <option>Bills</option>
+            <option>Other</option>
+          </select>
+          <input id="amount" type="number" placeholder="Amount (₹)">
+          <button onclick="addTransaction()">Add</button>
+        </div>
+        <table>
+          <thead><tr><th>Category</th><th>Amount</th><th></th></tr></thead>
+          <tbody id="txnBody">
+            <tr><td colspan="3" class="empty-state">No transactions yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Recommendation -->
+      <div class="panel">
+        <h3>Your recommended allocation</h3>
+        <div id="recoContent">
+          <p class="empty-state">Complete your profile and add some income/transactions, then click below.</p>
+        </div>
+        <button onclick="loadRecommendation()">Get my recommendation</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = '/static/login.html';
+
+    function authHeaders() {
+      return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+    }
+    function logout() {
+      localStorage.removeItem('token');
+      window.location.href = '/static/login.html';
+    }
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    }
+
+    // ---- Profile ----
+    async function loadProfile() {
+      const res = await fetch('/profile', { headers: authHeaders() });
+      if (res.status === 401) return logout();
+      const p = await res.json();
+      if (p.age) document.getElementById('age').value = p.age;
+      if (p.dependents !== null) document.getElementById('dependents').value = p.dependents;
+      document.getElementById('emergency').value = p.has_emergency_fund ? 'true' : 'false';
+    }
+
+    async function saveProfile() {
+      const body = {
+        age: parseInt(document.getElementById('age').value),
+        dependents: parseInt(document.getElementById('dependents').value) || 0,
+        has_emergency_fund: document.getElementById('emergency').value === 'true'
+      };
+      const res = await fetch('/profile', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      if (res.status === 401) return logout();
+      if (!res.ok) {
+        document.getElementById('profileMsg').innerText = 'Could not save — check your inputs.';
+        return;
+      }
+      document.getElementById('profileMsg').innerText = '';
+      showToast('Profile saved');
+    }
+
+    // ---- Income ----
+    async function addIncome() {
+      const name = document.getElementById('incomeName').value;
+      const amount = parseFloat(document.getElementById('incomeAmount').value);
+      if (!name || !amount) return;
+      await fetch('/income', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, amount }) });
+      document.getElementById('incomeName').value = '';
+      document.getElementById('incomeAmount').value = '';
+      showToast('Income added');
+      loadIncome();
+    }
+
+    async function deleteIncome(id) {
+      await fetch('/income/' + id, { method: 'DELETE', headers: authHeaders() });
+      loadIncome();
+    }
+
+    async function loadIncome() {
+      const res = await fetch('/income', { headers: authHeaders() });
+      if (res.status === 401) return logout();
+      const items = await res.json();
+      const body = document.getElementById('incomeBody');
+      if (items.length === 0) {
+        body.innerHTML = '<tr><td colspan="3" class="empty-state">No income sources yet</td></tr>';
+        return;
+      }
+      body.innerHTML = items.map(i => `
+        <tr>
+          <td>${i.name}</td>
+          <td>₹${i.amount.toLocaleString('en-IN')}</td>
+          <td class="actions"><button class="small danger" onclick="deleteIncome(${i.id})">Delete</button></td>
+        </tr>`).join('');
+    }
+
+    // ---- Transactions ----
+    async function addTransaction() {
+      const category = document.getElementById('category').value;
+      const amount = parseFloat(document.getElementById('amount').value);
+      if (!amount) return;
+      await fetch('/transactions', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ category, amount }) });
+      document.getElementById('amount').value = '';
+      showToast('Transaction added');
+      loadTransactions();
+    }
+
+    async function deleteTransaction(id) {
+      await fetch('/transactions/' + id, { method: 'DELETE', headers: authHeaders() });
+      loadTransactions();
+    }
+
+    async function loadTransactions() {
+      const res = await fetch('/transactions', { headers: authHeaders() });
+      if (res.status === 401) return logout();
+      const txns = await res.json();
+      const body = document.getElementById('txnBody');
+      if (txns.length === 0) {
+        body.innerHTML = '<tr><td colspan="3" class="empty-state">No transactions yet</td></tr>';
+        return;
+      }
+      body.innerHTML = txns.map(t => `
+        <tr>
+          <td>${t.category}</td>
+          <td>₹${t.amount.toLocaleString('en-IN')}</td>
+          <td class="actions"><button class="small danger" onclick="deleteTransaction(${t.id})">Delete</button></td>
+        </tr>`).join('');
+    }
+
+    // ---- Recommendation ----
+    async function loadRecommendation() {
+      const res = await fetch('/recommend', { headers: authHeaders() });
+      if (res.status === 401) return logout();
+      const data = await res.json();
+      const container = document.getElementById('recoContent');
+
+      if (!res.ok) {
+        container.innerHTML = `<p class="empty-state">${data.detail || 'Could not generate a recommendation yet.'}</p>`;
+        return;
+      }
+
+      const eqEnd = data.equity_pct;
+      const debtEnd = eqEnd + data.debt_pct;
+      const goldEnd = debtEnd + data.gold_pct;
+
+      container.innerHTML = `
+        <div class="allocation-layout">
+          <div class="donut-wrap">
+            <div class="donut" style="--eq-end:${eqEnd}%; --debt-end:${debtEnd}%; --gold-end:${goldEnd}%;"></div>
+            <div class="donut-center">${data.equity_pct}%\nEquity</div>
+          </div>
+          <div class="legend">
+            <div class="row"><span class="dot" style="background:#1F6F54"></span><span class="label">Equity</span><span class="value">${data.equity_pct}%</span></div>
+            <div class="row"><span class="dot" style="background:#3B6E8F"></span><span class="label">Debt</span><span class="value">${data.debt_pct}%</span></div>
+            <div class="row"><span class="dot" style="background:#B8862B"></span><span class="label">Gold</span><span class="value">${data.gold_pct}%</span></div>
+            <div class="row"><span class="dot" style="background:#8C6A4E"></span><span class="label">FD</span><span class="value">${data.fd_pct}%</span></div>
+          </div>
+        </div>
+        <ul class="reasoning-list">${data.reasoning.map(r => `<li>${r}</li>`).join('')}</ul>
+      `;
+    }
+
+    loadProfile();
+    loadIncome();
+    loadTransactions();
+  </script>
+</body>
+</html>

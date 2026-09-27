@@ -1,38 +1,62 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login - Finance Advisor</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in — Finance Advisor</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="card">
-    <h1>Log in</h1>
-    <div class="error" id="error"></div>
-    <input id="email" type="email" placeholder="Email">
-    <input id="password" type="password" placeholder="Password">
-    <button onclick="login()">Log In</button>
-    <div class="link">No account? <a href="/static/signup.html">Sign up</a></div>
+  <div class="auth-shell">
+    <div class="auth-brand">
+      <h1>Know where your money should go.</h1>
+    </div>
+    <div class="auth-form-side">
+      <div class="auth-form">
+        <h2>Welcome back</h2>
+        <div class="sub">Log in to see your dashboard.</div>
+        <div class="error" id="error"></div>
+        <label>Email</label>
+        <input id="email" type="email">
+        <label>Password</label>
+        <input id="password" type="password">
+        <button id="btn" onclick="login()">Log in</button>
+        <div class="link">No account? <a href="/static/signup.html">Sign up</a></div>
+      </div>
+    </div>
   </div>
 
   <script>
     async function login() {
+      const btn = document.getElementById('btn');
+      const errorEl = document.getElementById('error');
+      errorEl.innerText = '';
+      btn.disabled = true;
+      btn.innerText = 'Logging in...';
+
       const body = {
         email: document.getElementById('email').value,
         password: document.getElementById('password').value
       };
-      const res = await fetch('/login', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body)
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        document.getElementById('error').innerText = data.detail || 'Login failed';
-        return;
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Login failed');
+        localStorage.setItem('token', data.access_token);
+        window.location.href = '/static/dashboard.html';
+      } catch (e) {
+        errorEl.innerText = e.message;
+        btn.disabled = false;
+        btn.innerText = 'Log in';
       }
-      localStorage.setItem('token', data.access_token);
-      window.location.href = '/static/dashboard.html';
     }
+    document.getElementById('password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') login();
+    });
   </script>
 </body>
 </html>
