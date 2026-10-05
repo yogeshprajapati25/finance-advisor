@@ -1,38 +1,81 @@
-from app.db.models import IncomeSourceDB
-from app.core.models import IncomeSource
-from fastapi import FastAPI
-from pydantic import BaseModel
-from app.core.models import ProfileUpdate
+from datetime import datetime
+from typing import Optional
 
-from app.core.models import UserProfile, AllocationResult,Transaction, SpendingSummary
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db, engine, Base
+from app.db.models import UserDB, TransactionDB, IncomeSourceDB
+from app.core.models import (
+    UserProfile,
+    AllocationResult,
+    Transaction as TransactionSchema,
+    SpendingSummary,
+    UserSignup,
+    UserLogin,
+    Token,
+    IncomeSource,
+    ProfileUpdate,
+)
 from app.core.allocation import suggest_allocation
 from app.core.spending import calculate_spending_summary
-from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException, status
-
-from app.db.database import get_db
-from app.db.models import UserDB
-from app.core.models import UserSignup, UserLogin, Token
-from app.core.security import hash_password, verify_password, create_access_token
-
-from app.core.security import get_current_user
-from app.db.models import TransactionDB
-from app.core.models import Transaction as TransactionSchema
-from datetime import datetime
-
-
-from app.db.database import engine, Base
-from app.db import models as db_models
+from app.core.security import hash_password, verify_password, create_access_token, get_current_user
 
 app = FastAPI(title="Personal Finance Advisor")
-
-from fastapi.staticfiles import StaticFiles
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 Base.metadata.create_all(bind=engine)
 
-@app.post("/signup", response_model=Token)
+
+def current_month_str() -> str:
+    return datetime.utcnow().strftime("%Y-%m")
+
+
+# ============================================================
+# PAGE ROUTES — serve the frontend HTML at clean URLs
+# ============================================================
+
+@app.get("/")
+def root_page():
+    return FileResponse("app/static/login.html")
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse("app/static/login.html")
+
+
+@app.get("/signup")
+def signup_page():
+    return FileResponse("app/static/signup.html")
+
+
+@app.get("/dashboard")
+def dashboard_page():
+    return FileResponse("app/static/dashboard.html")
+
+
+@app.get("/profile")
+def profile_page():
+    return FileResponse("app/static/profile.html")
+
+
+# ============================================================
+# API ROUTES — all data endpoints, under /api
+# ============================================================
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+# ---- Auth ----
+
+@app.post("/api/signup", response_model=Token)
 def signup(user: UserSignup, db: Session = Depends(get_db)):
     existing = db.query(UserDB).filter(UserDB.email == user.email).first()
     if existing:
@@ -50,7 +93,7 @@ def signup(user: UserSignup, db: Session = Depends(get_db)):
     return Token(access_token=token)
 
 
-@app.post("/login", response_model=Token)
+@app.post("/api/login", response_model=Token)
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(UserDB).filter(UserDB.email == credentials.email).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
@@ -62,7 +105,37 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
     token = create_access_token({"sub": str(user.id)})
     return Token(access_token=token)
 
-@app.post("/transactions")
+
+# ---- Profile ----
+
+@app.post("/api/profile")
+def complete_profile(
+    profile: ProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    current_user.age = profile.age
+    current_user.dependents = profile.dependents
+    current_user.has_emergency_fund = profile.has_emergency_fund
+    current_user.profile_complete = True
+    db.commit()
+    return {"message": "Profile updated"}
+
+
+@app.get("/api/profile")
+def get_profile(current_user: UserDB = Depends(get_current_user)):
+    return {
+        "email": current_user.email,
+        "age": current_user.age,
+        "dependents": current_user.dependents,
+        "has_emergency_fund": current_user.has_emergency_fund,
+        "profile_complete": current_user.profile_complete,
+    }
+
+
+# ---- Transactions ----
+
+@app.post("/api/transactions")
 def add_transaction(
     txn: TransactionSchema,
     db: Session = Depends(get_db),
@@ -86,9 +159,9 @@ def add_transaction(
     }
 
 
-@app.get("/transactions")
+@app.get("/api/transactions")
 def get_transactions(
-    month: str | None = None,
+    month: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
@@ -107,7 +180,8 @@ def get_transactions(
         for t in txns
     ]
 
-@app.put("/transactions/{txn_id}")
+
+@app.put("/api/transactions/{txn_id}")
 def update_transaction(
     txn_id: int,
     txn: TransactionSchema,
@@ -129,7 +203,7 @@ def update_transaction(
     return {"message": "Updated"}
 
 
-@app.delete("/transactions/{txn_id}")
+@app.delete("/api/transactions/{txn_id}")
 def delete_transaction(
     txn_id: int,
     db: Session = Depends(get_db),
@@ -147,80 +221,10 @@ def delete_transaction(
     db.commit()
     return {"message": "Deleted"}
 
-@app.post("/recommend", response_model=AllocationResult)
-def recommend(profile: UserProfile) -> AllocationResult:
-    return suggest_allocation(profile)
 
-@app.get("/recommend", response_model=AllocationResult)
-def recommend_for_user(
-    month: str | None = None,
-    db: Session = Depends(get_db),
-    current_user: UserDB = Depends(get_current_user),
-):
-    if not current_user.profile_complete:
-        raise HTTPException(
-            status_code=400,
-            detail="Please complete your profile before requesting a recommendation.",
-        )
+# ---- Income sources ----
 
-    target_month = month or current_month_str()
-
-    txns = (
-        db.query(TransactionDB)
-        .filter(TransactionDB.user_id == current_user.id, TransactionDB.month == target_month)
-        .all()
-    )
-    txn_schemas = [
-        TransactionSchema(category=t.category, amount=t.amount, description=t.description)
-        for t in txns
-    ]
-
-    income_sources = (
-        db.query(IncomeSourceDB)
-        .filter(IncomeSourceDB.user_id == current_user.id, IncomeSourceDB.month == target_month)
-        .all()
-    )
-    total_income = sum(i.amount for i in income_sources)
-
-    summary = calculate_spending_summary(txn_schemas, total_income)
-
-    profile = UserProfile(
-        age=current_user.age,
-        monthly_income=total_income,
-        monthly_expenses=summary.total_expenses,
-        dependents=current_user.dependents,
-        has_emergency_fund=current_user.has_emergency_fund,
-    )
-    return suggest_allocation(profile, savings_rate_override=summary.savings_rate)
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-class RecommendFromTransactionsRequest(BaseModel):
-    profile: UserProfile
-    transactions: list[Transaction]
-
-
-@app.post("/recommend-from-transactions", response_model=AllocationResult)
-def recommend_from_transactions(
-    request: RecommendFromTransactionsRequest,
-) -> AllocationResult:
-    summary = calculate_spending_summary(
-        request.transactions, request.profile.monthly_income
-    )
-    return suggest_allocation(
-        request.profile, savings_rate_override=summary.savings_rate
-    )
-
-
-def current_month_str() -> str:
-    return datetime.utcnow().strftime("%Y-%m")
-
-
-@app.post("/income")
+@app.post("/api/income")
 def add_income(
     income: IncomeSource,
     db: Session = Depends(get_db),
@@ -243,9 +247,9 @@ def add_income(
     }
 
 
-@app.get("/income")
+@app.get("/api/income")
 def list_income(
-    month: str | None = None,
+    month: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
@@ -259,7 +263,7 @@ def list_income(
     ]
 
 
-@app.put("/income/{income_id}")
+@app.put("/api/income/{income_id}")
 def update_income(
     income_id: int,
     income: IncomeSource,
@@ -281,7 +285,7 @@ def update_income(
     return {"message": "Updated"}
 
 
-@app.delete("/income/{income_id}")
+@app.delete("/api/income/{income_id}")
 def delete_income(
     income_id: int,
     db: Session = Depends(get_db),
@@ -299,26 +303,84 @@ def delete_income(
     db.commit()
     return {"message": "Deleted"}
 
-@app.post("/profile")
-def complete_profile(
-    profile: ProfileUpdate,
+
+# ---- Recommendation ----
+
+@app.get("/api/recommend", response_model=AllocationResult)
+def recommend_for_user(
+    month: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    current_user.age = profile.age
-    current_user.dependents = profile.dependents
-    current_user.has_emergency_fund = profile.has_emergency_fund
-    current_user.profile_complete = True
-    db.commit()
-    return {"message": "Profile updated"}
+    if not current_user.profile_complete:
+        raise HTTPException(
+            status_code=400,
+            detail="Please complete your profile before requesting a recommendation.",
+        )
+
+    # Guard: age must be set (profile_complete flag alone isn't enough if
+    # the DB row was created before the flag was introduced)
+    if current_user.age is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Your profile is missing your age. Please update your profile.",
+        )
+
+    target_month = month or current_month_str()
+
+    txns = (
+        db.query(TransactionDB)
+        .filter(TransactionDB.user_id == current_user.id, TransactionDB.month == target_month)
+        .all()
+    )
+    income_sources = (
+        db.query(IncomeSourceDB)
+        .filter(IncomeSourceDB.user_id == current_user.id, IncomeSourceDB.month == target_month)
+        .all()
+    )
+
+    if not txns and not income_sources:
+        raise HTTPException(
+            status_code=400,
+            detail="Add at least one income source or transaction for this month to get a recommendation.",
+        )
+
+    txn_schemas = [
+        TransactionSchema(category=t.category, amount=t.amount, description=t.description)
+        for t in txns
+    ]
+    total_income = sum(i.amount for i in income_sources)
+    summary = calculate_spending_summary(txn_schemas, total_income)
+
+    profile = UserProfile(
+        age=current_user.age,
+        monthly_income=total_income,
+        monthly_expenses=summary.total_expenses,
+        dependents=current_user.dependents,
+        has_emergency_fund=current_user.has_emergency_fund,
+    )
+    return suggest_allocation(profile, savings_rate_override=summary.savings_rate)
 
 
-@app.get("/profile")
-def get_profile(current_user: UserDB = Depends(get_current_user)):
-    return {
-        "email": current_user.email,
-        "age": current_user.age,
-        "dependents": current_user.dependents,
-        "has_emergency_fund": current_user.has_emergency_fund,
-        "profile_complete": current_user.profile_complete,
-    }
+# ---- Stateless recommend (kept for testing/demo without auth) ----
+
+@app.post("/api/recommend-stateless", response_model=AllocationResult)
+def recommend_stateless(profile: UserProfile) -> AllocationResult:
+    return suggest_allocation(profile)
+
+
+class RecommendFromTransactionsRequest(BaseModel):
+    profile: UserProfile
+    transactions: list[TransactionSchema]
+
+
+@app.post("/api/recommend-from-transactions", response_model=AllocationResult)
+def recommend_from_transactions(
+    request: RecommendFromTransactionsRequest,
+) -> AllocationResult:
+    summary = calculate_spending_summary(
+        request.transactions, request.profile.monthly_income
+    )
+    return suggest_allocation(
+        request.profile, savings_rate_override=summary.savings_rate
+    )

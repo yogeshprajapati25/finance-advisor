@@ -1,6 +1,6 @@
 from app.core.models import UserProfile, AllocationResult
 
-GOLD_PCT = 7.5  # fixed, within the 5-10% band
+GOLD_PCT = 7.5
 
 
 def suggest_allocation(
@@ -8,22 +8,6 @@ def suggest_allocation(
 ) -> AllocationResult:
     reasoning: list[str] = []
 
-    # 1. Emergency fund check
-    if not profile.has_emergency_fund:
-        reasoning.append(
-            "No emergency fund detected — prioritize building 6 months of "
-            "expenses in a liquid fund/FD before increasing equity exposure."
-        )
-
-    # 2. Base equity % from age, clamped 20-80
-    base_equity = 100 - profile.age
-    base_equity = max(20, min(80, base_equity))
-    reasoning.append(
-        f"Base equity allocation of {base_equity}% derived from age "
-        f"({profile.age}) using the '100 - age' rule, clamped to 20-80%."
-    )
-
-    # 3. Adjust by savings rate
     if savings_rate_override is not None:
         savings_rate = savings_rate_override
     else:
@@ -33,28 +17,67 @@ def suggest_allocation(
                 profile.monthly_income - profile.monthly_expenses
             ) / profile.monthly_income
 
-    equity_pct = base_equity
-    if savings_rate >= 0.4:
-        equity_pct += 10
+    # Case: overspending (expenses > income)
+    if savings_rate < 0:
         reasoning.append(
-            f"High savings rate ({savings_rate:.0%}) — increasing equity "
-            f"allocation by 10% to capture higher long-term growth."
+            "Your expenses exceed your income this period. Investing isn't "
+            "advisable right now — focus on cutting expenses, increasing "
+            "income, or covering the gap with savings before allocating "
+            "anything to investments."
         )
-    elif savings_rate < 0.15:
-        equity_pct -= 10
+        return AllocationResult(
+            equity_pct=0.0, debt_pct=0.0, gold_pct=0.0, fd_pct=0.0,
+            reasoning=reasoning, status="overspending",
+        )
+
+    # Case: breakeven (income exactly covers expenses, nothing left over)
+    if savings_rate == 0:
         reasoning.append(
-            f"Low savings rate ({savings_rate:.0%}) — reducing equity "
-            f"allocation by 10% in favor of safer, more liquid instruments."
+            "You're breaking even this period — income covers expenses "
+            "exactly, with nothing left over to invest yet. This isn't a "
+            "deficit, but there's no surplus to allocate until your "
+            "savings rate turns positive."
+        )
+        return AllocationResult(
+            equity_pct=0.0, debt_pct=0.0, gold_pct=0.0, fd_pct=0.0,
+            reasoning=reasoning, status="breakeven",
+        )
+
+    # Case: normal — positive savings rate
+    if not profile.has_emergency_fund:
+        reasoning.append(
+            "No emergency fund detected — prioritize building 6 months of "
+            "expenses in a liquid fund/FD before increasing equity exposure."
+        )
+
+    base_equity = 100 - profile.age
+    base_equity = max(20, min(80, base_equity))
+    reasoning.append(
+        f"Base equity allocation of {base_equity}% derived from age "
+        f"({profile.age}) using the '100 - age' rule, clamped to 20-80%."
+    )
+
+    adjustment = (savings_rate - 0.25) * 50
+    adjustment = max(-15, min(15, adjustment))
+    equity_pct = max(20, min(80, base_equity + adjustment))
+
+    if adjustment > 2:
+        reasoning.append(
+            f"Savings rate of {savings_rate:.0%} is healthy — "
+            f"increasing equity allocation by {adjustment:.1f} points."
+        )
+    elif adjustment < -2:
+        reasoning.append(
+            f"Savings rate of {savings_rate:.0%} is low — reducing "
+            f"equity allocation by {abs(adjustment):.1f} points in "
+            f"favor of safer instruments."
         )
     else:
         reasoning.append(
-            f"Moderate savings rate ({savings_rate:.0%}) — no adjustment "
-            f"to base equity allocation."
+            f"Savings rate of {savings_rate:.0%} is moderate — no "
+            f"major adjustment to base equity allocation."
         )
 
-    equity_pct = max(20, min(80, equity_pct))
-
-    # 4. Gold fixed, remainder split between debt and FD
     remaining = 100 - equity_pct - GOLD_PCT
     debt_pct = remaining * 0.6
     fd_pct = remaining * 0.4
@@ -71,4 +94,5 @@ def suggest_allocation(
         gold_pct=round(GOLD_PCT, 1),
         fd_pct=round(fd_pct, 1),
         reasoning=reasoning,
+        status="ok",
     )

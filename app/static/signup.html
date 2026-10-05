@@ -21,7 +21,7 @@
         <label>Password</label>
         <input id="password" type="password">
         <button id="btn" onclick="signup()">Create account</button>
-        <div class="link">Already have an account? <a href="/static/login.html">Log in</a></div>
+        <div class="link">Already have an account? <a href="/login">Log in</a></div>
       </div>
     </div>
   </div>
@@ -39,7 +39,7 @@
         password: document.getElementById('password').value
       };
       try {
-        const res = await fetch('/signup', {
+        const res = await fetch('/api/signup', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(body)
@@ -47,7 +47,7 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Signup failed');
         localStorage.setItem('token', data.access_token);
-        window.location.href = '/static/dashboard.html';
+        window.location.href = '/dashboard';
       } catch (e) {
         errorEl.innerText = e.message;
         btn.disabled = false;

@@ -11,8 +11,8 @@
     <div class="sidebar">
       <div class="brand">Finance Advisor</div>
       <nav>
-        <a href="/static/dashboard.html">Dashboard</a>
-        <a href="/static/profile.html" class="active">My Profile</a>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/profile" class="active">My Profile</a>
       </nav>
       <div class="logout" onclick="logout()">Log out</div>
     </div>
@@ -21,7 +21,6 @@
       <div class="greeting">Your details</div>
       <h1>My Profile</h1>
 
-      <!-- Basic profile info -->
       <div class="panel">
         <div class="panel-head"><h3>About you</h3></div>
         <div class="add-row">
@@ -36,7 +35,6 @@
         <div class="error" id="profileMsg"></div>
       </div>
 
-      <!-- Income sources -->
       <div class="panel">
         <div class="panel-head"><h3>Income sources (this month)</h3></div>
         <div class="add-row">
@@ -52,7 +50,6 @@
         </table>
       </div>
 
-      <!-- Transactions -->
       <div class="panel">
         <div class="panel-head"><h3>Transactions (this month)</h3></div>
         <div class="add-row">
@@ -75,13 +72,15 @@
         </table>
       </div>
 
-      <!-- Recommendation -->
       <div class="panel">
-        <h3>Your recommended allocation</h3>
-        <div id="recoContent">
-          <p class="empty-state">Complete your profile and add some income/transactions, then click below.</p>
+        <div class="panel-head">
+          <h3>Your recommended allocation</h3>
+          <button onclick="loadRecommendation()">Refresh recommendation</button>
         </div>
-        <button onclick="loadRecommendation()">Get my recommendation</button>
+        <div id="totalsBar" style="font-size:13px; color:var(--muted); margin-bottom:16px;"></div>
+        <div id="recoContent">
+          <p class="empty-state">Add income and transactions above, then click "Refresh recommendation."</p>
+        </div>
       </div>
     </div>
   </div>
@@ -90,39 +89,66 @@
 
   <script>
     const token = localStorage.getItem('token');
-    if (!token) window.location.href = '/static/login.html';
+    if (!token) window.location.href = '/login';
+
+    // In-memory snapshots of the most recently fetched data.
+    // Only loadRecommendation() writes these — mutation handlers never
+    // pre-fetch independently, which was the source of the race condition.
+    let currentIncome = [];
+    let currentTxns   = [];
+
+    // AbortController covers the ENTIRE loadRecommendation run —
+    // list fetches + the /api/recommend call — so a rapid second click
+    // cancels everything from the first call, not just the final fetch.
+    let recoAbortCtrl = null;
 
     function authHeaders() {
       return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
     }
     function logout() {
       localStorage.removeItem('token');
-      window.location.href = '/static/login.html';
+      window.location.href = '/login';
     }
     function showToast(msg) {
       const t = document.getElementById('toast');
       t.innerText = msg;
       t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 2000);
+      setTimeout(() => t.classList.remove('show'), 2500);
     }
 
-    // ---- Profile ----
+    // Always bypass the browser cache so deletes/adds are visible immediately.
+    function noStoreFetch(url, options = {}) {
+      const sep = url.includes('?') ? '&' : '?';
+      return fetch(url + sep + '_=' + Date.now(), { ...options, cache: 'no-store' });
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Profile
+    // ------------------------------------------------------------------ //
+
     async function loadProfile() {
-      const res = await fetch('/profile', { headers: authHeaders() });
+      const res = await noStoreFetch('/api/profile', { headers: authHeaders() });
       if (res.status === 401) return logout();
       const p = await res.json();
-      if (p.age) document.getElementById('age').value = p.age;
-      if (p.dependents !== null) document.getElementById('dependents').value = p.dependents;
+      if (p.age)              document.getElementById('age').value        = p.age;
+      if (p.dependents != null) document.getElementById('dependents').value = p.dependents;
       document.getElementById('emergency').value = p.has_emergency_fund ? 'true' : 'false';
     }
 
     async function saveProfile() {
+      const age = parseInt(document.getElementById('age').value);
+      if (!age || age < 1 || age > 120) {
+        document.getElementById('profileMsg').innerText = 'Please enter a valid age.';
+        return;
+      }
       const body = {
-        age: parseInt(document.getElementById('age').value),
+        age,
         dependents: parseInt(document.getElementById('dependents').value) || 0,
-        has_emergency_fund: document.getElementById('emergency').value === 'true'
+        has_emergency_fund: document.getElementById('emergency').value === 'true',
       };
-      const res = await fetch('/profile', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      const res = await fetch('/api/profile', {
+        method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
+      });
       if (res.status === 401) return logout();
       if (!res.ok) {
         document.getElementById('profileMsg').innerText = 'Could not save — check your inputs.';
@@ -130,89 +156,209 @@
       }
       document.getElementById('profileMsg').innerText = '';
       showToast('Profile saved');
+      // Profile change affects the recommendation — refresh it.
+      await loadRecommendation();
     }
 
-    // ---- Income ----
+    // ------------------------------------------------------------------ //
+    //  Income — mutation handlers only mutate then delegate to
+    //  loadRecommendation(), which always re-fetches everything fresh.
+    // ------------------------------------------------------------------ //
+
     async function addIncome() {
-      const name = document.getElementById('incomeName').value;
+      const name   = document.getElementById('incomeName').value.trim();
       const amount = parseFloat(document.getElementById('incomeAmount').value);
-      if (!name || !amount) return;
-      await fetch('/income', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, amount }) });
-      document.getElementById('incomeName').value = '';
+      if (!name || !amount || amount <= 0) return;
+
+      const res = await fetch('/api/income', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ name, amount }),
+      });
+      if (!res.ok) { showToast('Could not add income'); return; }
+
+      document.getElementById('incomeName').value  = '';
       document.getElementById('incomeAmount').value = '';
       showToast('Income added');
-      loadIncome();
+      // loadRecommendation re-fetches income + transactions then calls /api/recommend.
+      await loadRecommendation();
     }
 
     async function deleteIncome(id) {
-      await fetch('/income/' + id, { method: 'DELETE', headers: authHeaders() });
-      loadIncome();
+      const res = await fetch('/api/income/' + id, {
+        method: 'DELETE', headers: authHeaders(),
+      });
+      if (!res.ok) { showToast('Could not delete income'); return; }
+      showToast('Income removed');
+      await loadRecommendation();
     }
 
-    async function loadIncome() {
-      const res = await fetch('/income', { headers: authHeaders() });
-      if (res.status === 401) return logout();
-      const items = await res.json();
-      const body = document.getElementById('incomeBody');
-      if (items.length === 0) {
-        body.innerHTML = '<tr><td colspan="3" class="empty-state">No income sources yet</td></tr>';
-        return;
-      }
-      body.innerHTML = items.map(i => `
-        <tr>
-          <td>${i.name}</td>
-          <td>₹${i.amount.toLocaleString('en-IN')}</td>
-          <td class="actions"><button class="small danger" onclick="deleteIncome(${i.id})">Delete</button></td>
-        </tr>`).join('');
-    }
+    // ------------------------------------------------------------------ //
+    //  Transactions — same pattern: mutate → loadRecommendation.
+    // ------------------------------------------------------------------ //
 
-    // ---- Transactions ----
     async function addTransaction() {
       const category = document.getElementById('category').value;
-      const amount = parseFloat(document.getElementById('amount').value);
-      if (!amount) return;
-      await fetch('/transactions', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ category, amount }) });
+      const amount   = parseFloat(document.getElementById('amount').value);
+      if (!amount || amount <= 0) return;
+
+      const res = await fetch('/api/transactions', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ category, amount }),
+      });
+      if (!res.ok) { showToast('Could not add transaction'); return; }
+
       document.getElementById('amount').value = '';
       showToast('Transaction added');
-      loadTransactions();
+      await loadRecommendation();
     }
 
     async function deleteTransaction(id) {
-      await fetch('/transactions/' + id, { method: 'DELETE', headers: authHeaders() });
-      loadTransactions();
+      const res = await fetch('/api/transactions/' + id, {
+        method: 'DELETE', headers: authHeaders(),
+      });
+      if (!res.ok) { showToast('Could not delete transaction'); return; }
+      showToast('Transaction removed');
+      await loadRecommendation();
     }
 
-    async function loadTransactions() {
-      const res = await fetch('/transactions', { headers: authHeaders() });
-      if (res.status === 401) return logout();
-      const txns = await res.json();
+    // ------------------------------------------------------------------ //
+    //  Individual list renderers — accept the abort signal so a rapid
+    //  second button click cancels the in-flight list fetches too.
+    // ------------------------------------------------------------------ //
+
+    async function _fetchAndRenderIncome(signal) {
+      let res;
+      try {
+        res = await fetch('/api/income?_=' + Date.now(), {
+          headers: authHeaders(), cache: 'no-store', signal,
+        });
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;   // propagate so loadRecommendation exits cleanly
+        throw new Error('network');
+      }
+      if (res.status === 401) { logout(); throw new Error('auth'); }
+      if (!res.ok) throw new Error('server');
+      currentIncome = await res.json();
+
+      const body = document.getElementById('incomeBody');
+      body.innerHTML = currentIncome.length === 0
+        ? '<tr><td colspan="3" class="empty-state">No income sources yet</td></tr>'
+        : currentIncome.map(i => `
+            <tr>
+              <td>${i.name}</td>
+              <td>₹${i.amount.toLocaleString('en-IN')}</td>
+              <td class="actions">
+                <button class="small danger" onclick="deleteIncome(${i.id})">Delete</button>
+              </td>
+            </tr>`).join('');
+    }
+
+    async function _fetchAndRenderTransactions(signal) {
+      let res;
+      try {
+        res = await fetch('/api/transactions?_=' + Date.now(), {
+          headers: authHeaders(), cache: 'no-store', signal,
+        });
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        throw new Error('network');
+      }
+      if (res.status === 401) { logout(); throw new Error('auth'); }
+      if (!res.ok) throw new Error('server');
+      currentTxns = await res.json();
+
       const body = document.getElementById('txnBody');
-      if (txns.length === 0) {
-        body.innerHTML = '<tr><td colspan="3" class="empty-state">No transactions yet</td></tr>';
+      body.innerHTML = currentTxns.length === 0
+        ? '<tr><td colspan="3" class="empty-state">No transactions yet</td></tr>'
+        : currentTxns.map(t => `
+            <tr>
+              <td>${t.category}</td>
+              <td>₹${t.amount.toLocaleString('en-IN')}</td>
+              <td class="actions">
+                <button class="small danger" onclick="deleteTransaction(${t.id})">Delete</button>
+              </td>
+            </tr>`).join('');
+    }
+
+    // ------------------------------------------------------------------ //
+    //  loadRecommendation — single entry point for all data on this page.
+    //  Cancels any previous in-flight run before starting a new one.
+    // ------------------------------------------------------------------ //
+
+    async function loadRecommendation() {
+      // Cancel the entire previous run (list fetches + recommend fetch).
+      if (recoAbortCtrl) recoAbortCtrl.abort();
+      recoAbortCtrl = new AbortController();
+      const signal = recoAbortCtrl.signal;
+
+      const container = document.getElementById('recoContent');
+      const totalsBar = document.getElementById('totalsBar');
+
+      container.innerHTML = '<p class="empty-state" style="color:var(--muted);">Calculating…</p>';
+
+      // Step 1 — fetch income + transactions in parallel, both cancellable.
+      try {
+        await Promise.all([
+          _fetchAndRenderIncome(signal),
+          _fetchAndRenderTransactions(signal),
+        ]);
+      } catch (e) {
+        if (e.name === 'AbortError') return;   // newer call took over — exit silently
+        if (e.message === 'auth') return;       // already redirected to login
+        container.innerHTML = '<p class="empty-state">Could not load your data. Please try again.</p>';
         return;
       }
-      body.innerHTML = txns.map(t => `
-        <tr>
-          <td>${t.category}</td>
-          <td>₹${t.amount.toLocaleString('en-IN')}</td>
-          <td class="actions"><button class="small danger" onclick="deleteTransaction(${t.id})">Delete</button></td>
-        </tr>`).join('');
-    }
 
-    // ---- Recommendation ----
-    async function loadRecommendation() {
-      const res = await fetch('/recommend', { headers: authHeaders() });
+      // Step 2 — compute totals from the fresh snapshots.
+      const totalIncome   = currentIncome.reduce((sum, i) => sum + i.amount, 0);
+      const totalExpenses = currentTxns.reduce((sum, t)   => sum + t.amount, 0);
+
+      totalsBar.innerText = (totalIncome > 0 || totalExpenses > 0)
+        ? `Total income: ₹${totalIncome.toLocaleString('en-IN')}  •  Total expenses: ₹${totalExpenses.toLocaleString('en-IN')}`
+        : '';
+
+      // Step 3 — nothing to recommend yet.
+      if (totalIncome === 0 && totalExpenses === 0) {
+        container.innerHTML = '<p class="empty-state">Add income and transactions above, then click "Refresh recommendation."</p>';
+        return;
+      }
+
+      // Step 4 — call /api/recommend, also cancellable.
+      let res;
+      try {
+        res = await fetch('/api/recommend?_=' + Date.now(), {
+          headers: authHeaders(),
+          cache: 'no-store',
+          signal,
+        });
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+        container.innerHTML = '<p class="empty-state">Network error — please try again.</p>';
+        return;
+      }
+
       if (res.status === 401) return logout();
+
       const data = await res.json();
-      const container = document.getElementById('recoContent');
 
       if (!res.ok) {
         container.innerHTML = `<p class="empty-state">${data.detail || 'Could not generate a recommendation yet.'}</p>`;
         return;
       }
 
-      const eqEnd = data.equity_pct;
-      const debtEnd = eqEnd + data.debt_pct;
+      // ---- Overspending / breakeven ----
+      if (data.status === 'overspending' || data.status === 'breakeven') {
+        const colour = data.status === 'overspending' ? 'var(--red)' : 'var(--gold)';
+        container.innerHTML = `
+          <div style="border-left:3px solid ${colour}; padding-left:14px; font-size:14px; line-height:1.7; color:var(--ink);">
+            ${data.reasoning.map(r => `<p style="margin:0 0 8px;">${r}</p>`).join('')}
+          </div>`;
+        return;
+      }
+
+      // ---- Normal allocation ----
+      const eqEnd   = data.equity_pct;
+      const debtEnd = eqEnd   + data.debt_pct;
       const goldEnd = debtEnd + data.gold_pct;
 
       container.innerHTML = `
@@ -228,13 +374,16 @@
             <div class="row"><span class="dot" style="background:#8C6A4E"></span><span class="label">FD</span><span class="value">${data.fd_pct}%</span></div>
           </div>
         </div>
-        <ul class="reasoning-list">${data.reasoning.map(r => `<li>${r}</li>`).join('')}</ul>
-      `;
+        <ul class="reasoning-list">
+          ${data.reasoning.map(r => `<li>${r}</li>`).join('')}
+        </ul>`;
     }
 
+    // ------------------------------------------------------------------ //
+    //  Initialise
+    // ------------------------------------------------------------------ //
     loadProfile();
-    loadIncome();
-    loadTransactions();
+    loadRecommendation();
   </script>
 </body>
 </html>

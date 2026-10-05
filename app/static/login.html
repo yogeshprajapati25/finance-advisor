@@ -21,7 +21,7 @@
         <label>Password</label>
         <input id="password" type="password">
         <button id="btn" onclick="login()">Log in</button>
-        <div class="link">No account? <a href="/static/signup.html">Sign up</a></div>
+        <div class="link">No account? <a href="/signup">Sign up</a></div>
       </div>
     </div>
   </div>
@@ -39,7 +39,7 @@
         password: document.getElementById('password').value
       };
       try {
-        const res = await fetch('/login', {
+        const res = await fetch('/api/login', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(body)
@@ -47,7 +47,7 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Login failed');
         localStorage.setItem('token', data.access_token);
-        window.location.href = '/static/dashboard.html';
+        window.location.href = '/dashboard';
       } catch (e) {
         errorEl.innerText = e.message;
         btn.disabled = false;
@@ -55,6 +55,9 @@
       }
     }
     document.getElementById('password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') login();
+    });
+    document.getElementById('email').addEventListener('keydown', e => {
       if (e.key === 'Enter') login();
     });
   </script>

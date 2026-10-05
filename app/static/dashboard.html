@@ -11,8 +11,8 @@
     <div class="sidebar">
       <div class="brand">Finance Advisor</div>
       <nav>
-        <a href="/static/dashboard.html" class="active">Dashboard</a>
-        <a href="/static/profile.html">My Profile</a>
+        <a href="/dashboard" class="active">Dashboard</a>
+        <a href="/profile">My Profile</a>
       </nav>
       <div class="logout" onclick="logout()">Log out</div>
     </div>
@@ -21,7 +21,7 @@
       <div class="hero">
         <h1>An allocation across Equity, Debt, Gold, and FD — with the reasoning shown.</h1>
         <p>Log your income sources and monthly spending in your profile, and get a personalized recommendation that adjusts as your numbers change.</p>
-        <button onclick="window.location.href='/static/profile.html'">Go to my profile</button>
+        <button onclick="window.location.href='/profile'">Go to my profile</button>
       </div>
 
       <h3 style="margin-bottom:16px; font-size:15px;">How the categories work</h3>
@@ -52,11 +52,11 @@
 
   <script>
     const token = localStorage.getItem('token');
-    if (!token) window.location.href = '/static/login.html';
+    if (!token) window.location.href = '/login';
 
     function logout() {
       localStorage.removeItem('token');
-      window.location.href = '/static/login.html';
+      window.location.href = '/login';
     }
   </script>
 </body>

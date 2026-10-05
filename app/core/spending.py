@@ -13,9 +13,13 @@ def calculate_spending_summary(
         )
         total_expenses += txn.amount
 
-    savings_rate = 0.0
     if monthly_income > 0:
         savings_rate = (monthly_income - total_expenses) / monthly_income
+    elif total_expenses > 0:
+        # Spending with zero recorded income — treat as maximally overspent
+        savings_rate = -1.0
+    else:
+        savings_rate = 0.0
 
     return SpendingSummary(
         total_expenses=round(total_expenses, 2),

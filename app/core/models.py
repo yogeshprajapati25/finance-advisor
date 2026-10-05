@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -15,6 +17,7 @@ class AllocationResult(BaseModel):
     gold_pct: float
     fd_pct: float
     reasoning: list[str]
+    status: str = "ok"  # "ok" or "overspending"
 
 
 class Transaction(BaseModel):
@@ -47,7 +50,7 @@ class Token(BaseModel):
 class IncomeSource(BaseModel):
     name: str
     amount: float
-    month: str | None = None
+    month: Optional[str] = None
 
 
 class ProfileUpdate(BaseModel):
