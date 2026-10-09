@@ -1,7 +1,8 @@
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -23,8 +24,11 @@ from app.core.models import (
 from app.core.allocation import suggest_allocation
 from app.core.spending import calculate_spending_summary
 from app.core.security import hash_password, verify_password, create_access_token, get_current_user
+from app.core.parsers import parse_file, save_to_user_folder
 
 app = FastAPI(title="Personal Finance Advisor")
+
+INPUT_DATA_DIR = Path("input_data")
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
@@ -302,6 +306,35 @@ def delete_income(
     db.delete(existing)
     db.commit()
     return {"message": "Deleted"}
+
+
+# ---- File Upload ----
+
+ALLOWED_TYPES = {".csv", ".xlsx", ".xls", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+
+@app.post("/api/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: UserDB = Depends(get_current_user),
+):
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    content = await file.read()
+    try:
+        transactions = parse_file(file.filename, content)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not parse file: {e}")
+
+    if not transactions:
+        raise HTTPException(status_code=422, detail="No transactions found in file.")
+
+    saved_path = save_to_user_folder(current_user.id, transactions, INPUT_DATA_DIR)
+    return {
+        "message": f"{len(transactions)} transaction(s) imported.",
+        "saved_to": str(saved_path),
+    }
 
 
 # ---- Recommendation ----
