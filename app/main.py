@@ -25,6 +25,7 @@ from app.core.allocation import suggest_allocation
 from app.core.spending import calculate_spending_summary
 from app.core.security import hash_password, verify_password, create_access_token, get_current_user
 from app.core.parsers import parse_file, save_to_user_folder
+from app.core.mcp_client import fetch_file_transactions, fetch_file_income
 
 app = FastAPI(title="Personal Finance Advisor")
 
@@ -372,17 +373,37 @@ def recommend_for_user(
         .all()
     )
 
-    if not txns and not income_sources:
-        raise HTTPException(
-            status_code=400,
-            detail="Add at least one income source or transaction for this month to get a recommendation.",
-        )
-
     txn_schemas = [
         TransactionSchema(category=t.category, amount=t.amount, description=t.description)
         for t in txns
     ]
     total_income = sum(i.amount for i in income_sources)
+
+    # ── Merge with MCP file-based data ───────────────────────────────────────
+    # Transactions and income uploaded via file (CSV/PDF/image) are stored in
+    # input_data/user_{id}/ by the MCP server tools.  We merge them here so
+    # the recommendation reflects BOTH manually entered data and uploaded files.
+    try:
+        file_txns = fetch_file_transactions(current_user.id)
+        file_income = fetch_file_income(current_user.id)
+        for ft in file_txns:
+            txn_schemas.append(
+                TransactionSchema(
+                    category=ft.get("category", "Other"),
+                    amount=float(ft.get("amount", 0)),
+                    description=ft.get("description", ""),
+                )
+            )
+        total_income += sum(float(fi.get("amount", 0)) for fi in file_income)
+    except Exception:
+        pass  # file data is optional — never break recommendations
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not txn_schemas and total_income == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Add at least one income source or transaction for this month to get a recommendation.",
+        )
     summary = calculate_spending_summary(txn_schemas, total_income)
 
     profile = UserProfile(
