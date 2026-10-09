@@ -1,5 +1,34 @@
-
 [
+  {
+    "category": "Food",
+    "amount": 500.0,
+    "description": "Groceries"
+  },
+  {
+    "category": "Transport",
+    "amount": 200.0,
+    "description": "Bus pass"
+  },
+  {
+    "category": "Rent",
+    "amount": 8000.0,
+    "description": "Monthly rent"
+  },
+  {
+    "category": "Food",
+    "amount": 500.0,
+    "description": "Groceries"
+  },
+  {
+    "category": "Transport",
+    "amount": 200.0,
+    "description": "Bus pass"
+  },
+  {
+    "category": "Rent",
+    "amount": 8000.0,
+    "description": "Monthly rent"
+  },
   {
     "category": "Food",
     "amount": 500.0,

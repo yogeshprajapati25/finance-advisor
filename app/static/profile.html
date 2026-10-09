@@ -74,6 +74,36 @@
 
       <div class="panel">
         <div class="panel-head">
+          <h3>Upload financial data</h3>
+        </div>
+        <p style="font-size:13px; color:var(--muted); margin:0 0 12px;">
+          Upload a CSV, Excel, PDF, or photo of handwritten records — we'll extract transactions automatically.
+        </p>
+        <div id="dropZone" style="
+          border: 2px dashed var(--border);
+          border-radius: 8px;
+          padding: 28px 16px;
+          text-align: center;
+          color: var(--muted);
+          font-size: 14px;
+          cursor: pointer;
+          transition: border-color .2s, background .2s;
+        " onclick="document.getElementById('fileInput').click()"
+           ondragover="event.preventDefault(); this.style.borderColor='var(--green)'; this.style.background='#f0fff8';"
+           ondragleave="this.style.borderColor='var(--border)'; this.style.background='';"
+           ondrop="handleDrop(event)">
+          <div style="font-size:28px; margin-bottom:8px;">📂</div>
+          <div>Drag a file here or <u>click to browse</u></div>
+          <div style="font-size:12px; margin-top:6px;">CSV · Excel · PDF · PNG · JPG</div>
+        </div>
+        <input id="fileInput" type="file"
+               accept=".csv,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp"
+               style="display:none" onchange="uploadFile(this.files[0])">
+        <div id="uploadStatus" style="margin-top:12px; font-size:13px;"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
           <h3>Your recommended allocation</h3>
           <button onclick="loadRecommendation()">Refresh recommendation</button>
         </div>
@@ -377,6 +407,61 @@
         <ul class="reasoning-list">
           ${data.reasoning.map(r => `<li>${r}</li>`).join('')}
         </ul>`;
+    }
+
+    // ------------------------------------------------------------------ //
+    //  File Upload
+    // ------------------------------------------------------------------ //
+
+    function handleDrop(event) {
+      event.preventDefault();
+      const zone = document.getElementById('dropZone');
+      zone.style.borderColor = 'var(--border)';
+      zone.style.background  = '';
+      const file = event.dataTransfer.files[0];
+      if (file) uploadFile(file);
+    }
+
+    async function uploadFile(file) {
+      if (!file) return;
+
+      const status = document.getElementById('uploadStatus');
+      const zone   = document.getElementById('dropZone');
+
+      status.innerHTML = '<span style="color:var(--muted);">⏳ Uploading…</span>';
+      zone.style.pointerEvents = 'none';
+
+      const form = new FormData();
+      form.append('file', file);
+
+      let res;
+      try {
+        res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token },
+          body: form,
+        });
+      } catch {
+        status.innerHTML = '<span style="color:var(--red);">Network error — please try again.</span>';
+        zone.style.pointerEvents = '';
+        return;
+      }
+
+      zone.style.pointerEvents = '';
+      document.getElementById('fileInput').value = '';  // reset picker
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        status.innerHTML = `<span style="color:var(--red);">❌ ${data.detail || 'Upload failed.'}</span>`;
+        return;
+      }
+
+      status.innerHTML = `<span style="color:var(--green);">✅ ${data.message}</span>`;
+      showToast(data.message);
+
+      // Refresh recommendation to include newly uploaded transactions.
+      await loadRecommendation();
     }
 
     // ------------------------------------------------------------------ //
