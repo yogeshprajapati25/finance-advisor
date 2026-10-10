@@ -21,6 +21,7 @@
       <div class="greeting">Your details</div>
       <h1>My Profile</h1>
 
+      <!-- ── About you ── -->
       <div class="panel">
         <div class="panel-head"><h3>About you</h3></div>
         <div class="add-row">
@@ -35,6 +36,7 @@
         <div class="error" id="profileMsg"></div>
       </div>
 
+      <!-- ── Income sources ── -->
       <div class="panel">
         <div class="panel-head"><h3>Income sources (this month)</h3></div>
         <div class="add-row">
@@ -50,6 +52,7 @@
         </table>
       </div>
 
+      <!-- ── Transactions ── -->
       <div class="panel">
         <div class="panel-head"><h3>Transactions (this month)</h3></div>
         <div class="add-row">
@@ -72,44 +75,62 @@
         </table>
       </div>
 
+      <!-- ── Upload financial data ── -->
       <div class="panel">
-        <div class="panel-head">
-          <h3>Upload financial data</h3>
-        </div>
+        <div class="panel-head"><h3>Upload financial data</h3></div>
         <p style="font-size:13px; color:var(--muted); margin:0 0 12px;">
-          Upload a CSV, Excel, PDF, or photo of handwritten records — we'll extract transactions automatically.
+          Upload CSV, Excel, PDF, or a photo of handwritten records.
+          Income rows (Salary, Earnings, etc.) go to income; everything else goes to expenses.
         </p>
+
+        <!-- Drop zone -->
         <div id="dropZone" style="
-          border: 2px dashed var(--border);
-          border-radius: 8px;
-          padding: 28px 16px;
-          text-align: center;
-          color: var(--muted);
-          font-size: 14px;
-          cursor: pointer;
-          transition: border-color .2s, background .2s;
-        " onclick="document.getElementById('fileInput').click()"
-           ondragover="event.preventDefault(); this.style.borderColor='var(--green)'; this.style.background='#f0fff8';"
-           ondragleave="this.style.borderColor='var(--border)'; this.style.background='';"
-           ondrop="handleDrop(event)">
+            border:2px dashed var(--border); border-radius:8px;
+            padding:28px 16px; text-align:center; color:var(--muted);
+            font-size:14px; cursor:pointer; transition:border-color .2s, background .2s;"
+          onclick="document.getElementById('fileInput').click()"
+          ondragover="event.preventDefault(); this.style.borderColor='var(--green)'; this.style.background='#f0fff8';"
+          ondragleave="this.style.borderColor='var(--border)'; this.style.background='';"
+          ondrop="handleDrop(event)">
           <div style="font-size:28px; margin-bottom:8px;">📂</div>
           <div>Drag a file here or <u>click to browse</u></div>
-          <div style="font-size:12px; margin-top:6px;">CSV · Excel · PDF · PNG · JPG</div>
+          <div style="font-size:12px; margin-top:6px;">CSV · Excel · PDF · PNG · JPG · Handwritten photo</div>
         </div>
         <input id="fileInput" type="file"
                accept=".csv,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp"
                style="display:none" onchange="uploadFile(this.files[0])">
-        <div id="uploadStatus" style="margin-top:12px; font-size:13px;"></div>
+
+        <div id="uploadStatus" style="margin-top:10px; font-size:13px;"></div>
+
+        <!-- Uploaded files list -->
+        <div id="uploadedFilesSection" style="margin-top:16px; display:none;">
+          <div style="font-size:13px; font-weight:600; color:var(--ink); margin-bottom:8px;">
+            Uploaded files
+          </div>
+          <div id="uploadedFilesList"></div>
+        </div>
+
+        <!-- Imported data preview -->
+        <div id="importedDataSection" style="margin-top:16px; display:none;">
+          <div style="font-size:13px; font-weight:600; color:var(--ink); margin-bottom:8px;">
+            Imported from files
+          </div>
+          <table>
+            <thead><tr><th>Type</th><th>Name / Category</th><th>Amount</th></tr></thead>
+            <tbody id="importedDataBody"></tbody>
+          </table>
+        </div>
       </div>
 
+      <!-- ── Recommendation ── -->
       <div class="panel">
         <div class="panel-head">
           <h3>Your recommended allocation</h3>
-          <button onclick="loadRecommendation()">Refresh recommendation</button>
+          <button onclick="loadRecommendation()">Refresh</button>
         </div>
         <div id="totalsBar" style="font-size:13px; color:var(--muted); margin-bottom:16px;"></div>
         <div id="recoContent">
-          <p class="empty-state">Add income and transactions above, then click "Refresh recommendation."</p>
+          <p class="empty-state">Add income and transactions above to get a recommendation.</p>
         </div>
       </div>
     </div>
@@ -121,16 +142,11 @@
     const token = localStorage.getItem('token');
     if (!token) window.location.href = '/login';
 
-    // In-memory snapshots of the most recently fetched data.
-    // Only loadRecommendation() writes these — mutation handlers never
-    // pre-fetch independently, which was the source of the race condition.
     let currentIncome = [];
     let currentTxns   = [];
-
-    // AbortController covers the ENTIRE loadRecommendation run —
-    // list fetches + the /api/recommend call — so a rapid second click
-    // cancels everything from the first call, not just the final fetch.
     let recoAbortCtrl = null;
+
+    const inr = v => '₹' + Number(v).toLocaleString('en-IN');
 
     function authHeaders() {
       return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
@@ -143,24 +159,20 @@
       const t = document.getElementById('toast');
       t.innerText = msg;
       t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 2500);
+      setTimeout(() => t.classList.remove('show'), 2800);
+    }
+    function noStoreFetch(url, opts = {}) {
+      return fetch(url + (url.includes('?') ? '&' : '?') + '_=' + Date.now(),
+                   { ...opts, cache: 'no-store' });
     }
 
-    // Always bypass the browser cache so deletes/adds are visible immediately.
-    function noStoreFetch(url, options = {}) {
-      const sep = url.includes('?') ? '&' : '?';
-      return fetch(url + sep + '_=' + Date.now(), { ...options, cache: 'no-store' });
-    }
-
-    // ------------------------------------------------------------------ //
-    //  Profile
-    // ------------------------------------------------------------------ //
+    // ── Profile ────────────────────────────────────────────────────────── //
 
     async function loadProfile() {
       const res = await noStoreFetch('/api/profile', { headers: authHeaders() });
       if (res.status === 401) return logout();
       const p = await res.json();
-      if (p.age)              document.getElementById('age').value        = p.age;
+      if (p.age)               document.getElementById('age').value        = p.age;
       if (p.dependents != null) document.getElementById('dependents').value = p.dependents;
       document.getElementById('emergency').value = p.has_emergency_fund ? 'true' : 'false';
     }
@@ -171,231 +183,249 @@
         document.getElementById('profileMsg').innerText = 'Please enter a valid age.';
         return;
       }
-      const body = {
-        age,
-        dependents: parseInt(document.getElementById('dependents').value) || 0,
-        has_emergency_fund: document.getElementById('emergency').value === 'true',
-      };
       const res = await fetch('/api/profile', {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({
+          age,
+          dependents: parseInt(document.getElementById('dependents').value) || 0,
+          has_emergency_fund: document.getElementById('emergency').value === 'true',
+        }),
       });
       if (res.status === 401) return logout();
-      if (!res.ok) {
-        document.getElementById('profileMsg').innerText = 'Could not save — check your inputs.';
-        return;
-      }
+      if (!res.ok) { document.getElementById('profileMsg').innerText = 'Could not save.'; return; }
       document.getElementById('profileMsg').innerText = '';
       showToast('Profile saved');
-      // Profile change affects the recommendation — refresh it.
       await loadRecommendation();
     }
 
-    // ------------------------------------------------------------------ //
-    //  Income — mutation handlers only mutate then delegate to
-    //  loadRecommendation(), which always re-fetches everything fresh.
-    // ------------------------------------------------------------------ //
+    // ── Income ─────────────────────────────────────────────────────────── //
 
     async function addIncome() {
       const name   = document.getElementById('incomeName').value.trim();
       const amount = parseFloat(document.getElementById('incomeAmount').value);
       if (!name || !amount || amount <= 0) return;
-
       const res = await fetch('/api/income', {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ name, amount }),
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, amount }),
       });
       if (!res.ok) { showToast('Could not add income'); return; }
-
       document.getElementById('incomeName').value  = '';
       document.getElementById('incomeAmount').value = '';
       showToast('Income added');
-      // loadRecommendation re-fetches income + transactions then calls /api/recommend.
       await loadRecommendation();
     }
 
     async function deleteIncome(id) {
-      const res = await fetch('/api/income/' + id, {
-        method: 'DELETE', headers: authHeaders(),
-      });
+      const res = await fetch('/api/income/' + id, { method: 'DELETE', headers: authHeaders() });
       if (!res.ok) { showToast('Could not delete income'); return; }
       showToast('Income removed');
       await loadRecommendation();
     }
 
-    // ------------------------------------------------------------------ //
-    //  Transactions — same pattern: mutate → loadRecommendation.
-    // ------------------------------------------------------------------ //
+    // ── Transactions ───────────────────────────────────────────────────── //
 
     async function addTransaction() {
       const category = document.getElementById('category').value;
       const amount   = parseFloat(document.getElementById('amount').value);
       if (!amount || amount <= 0) return;
-
       const res = await fetch('/api/transactions', {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ category, amount }),
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({ category, amount }),
       });
       if (!res.ok) { showToast('Could not add transaction'); return; }
-
       document.getElementById('amount').value = '';
       showToast('Transaction added');
       await loadRecommendation();
     }
 
     async function deleteTransaction(id) {
-      const res = await fetch('/api/transactions/' + id, {
-        method: 'DELETE', headers: authHeaders(),
-      });
+      const res = await fetch('/api/transactions/' + id, { method: 'DELETE', headers: authHeaders() });
       if (!res.ok) { showToast('Could not delete transaction'); return; }
       showToast('Transaction removed');
       await loadRecommendation();
     }
 
-    // ------------------------------------------------------------------ //
-    //  Individual list renderers — accept the abort signal so a rapid
-    //  second button click cancels the in-flight list fetches too.
-    // ------------------------------------------------------------------ //
+    // ── List renderers (used inside loadRecommendation) ────────────────── //
 
     async function _fetchAndRenderIncome(signal) {
       let res;
       try {
-        res = await fetch('/api/income?_=' + Date.now(), {
-          headers: authHeaders(), cache: 'no-store', signal,
-        });
-      } catch (e) {
-        if (e.name === 'AbortError') throw e;   // propagate so loadRecommendation exits cleanly
-        throw new Error('network');
-      }
+        res = await fetch('/api/income?_=' + Date.now(),
+                          { headers: authHeaders(), cache: 'no-store', signal });
+      } catch (e) { if (e.name === 'AbortError') throw e; throw new Error('network'); }
       if (res.status === 401) { logout(); throw new Error('auth'); }
       if (!res.ok) throw new Error('server');
       currentIncome = await res.json();
 
-      const body = document.getElementById('incomeBody');
-      body.innerHTML = currentIncome.length === 0
+      document.getElementById('incomeBody').innerHTML = currentIncome.length === 0
         ? '<tr><td colspan="3" class="empty-state">No income sources yet</td></tr>'
-        : currentIncome.map(i => `
-            <tr>
-              <td>${i.name}</td>
-              <td>₹${i.amount.toLocaleString('en-IN')}</td>
-              <td class="actions">
-                <button class="small danger" onclick="deleteIncome(${i.id})">Delete</button>
-              </td>
-            </tr>`).join('');
+        : currentIncome.map(i => `<tr>
+            <td>${i.name}</td>
+            <td>${inr(i.amount)}</td>
+            <td class="actions"><button class="small danger" onclick="deleteIncome(${i.id})">Delete</button></td>
+          </tr>`).join('');
     }
 
     async function _fetchAndRenderTransactions(signal) {
       let res;
       try {
-        res = await fetch('/api/transactions?_=' + Date.now(), {
-          headers: authHeaders(), cache: 'no-store', signal,
-        });
-      } catch (e) {
-        if (e.name === 'AbortError') throw e;
-        throw new Error('network');
-      }
+        res = await fetch('/api/transactions?_=' + Date.now(),
+                          { headers: authHeaders(), cache: 'no-store', signal });
+      } catch (e) { if (e.name === 'AbortError') throw e; throw new Error('network'); }
       if (res.status === 401) { logout(); throw new Error('auth'); }
       if (!res.ok) throw new Error('server');
       currentTxns = await res.json();
 
-      const body = document.getElementById('txnBody');
-      body.innerHTML = currentTxns.length === 0
+      document.getElementById('txnBody').innerHTML = currentTxns.length === 0
         ? '<tr><td colspan="3" class="empty-state">No transactions yet</td></tr>'
-        : currentTxns.map(t => `
-            <tr>
-              <td>${t.category}</td>
-              <td>₹${t.amount.toLocaleString('en-IN')}</td>
-              <td class="actions">
-                <button class="small danger" onclick="deleteTransaction(${t.id})">Delete</button>
-              </td>
-            </tr>`).join('');
+        : currentTxns.map(t => `<tr>
+            <td>${t.category}</td>
+            <td>${inr(t.amount)}</td>
+            <td class="actions"><button class="small danger" onclick="deleteTransaction(${t.id})">Delete</button></td>
+          </tr>`).join('');
     }
 
-    // ------------------------------------------------------------------ //
-    //  loadRecommendation — single entry point for all data on this page.
-    //  Cancels any previous in-flight run before starting a new one.
-    // ------------------------------------------------------------------ //
+    // ── Uploaded files list ────────────────────────────────────────────── //
+
+    async function loadUploadedFiles() {
+      const res = await noStoreFetch('/api/upload/files', { headers: authHeaders() });
+      if (!res.ok) return;
+      const { files } = await res.json();
+
+      const section = document.getElementById('uploadedFilesSection');
+      const list    = document.getElementById('uploadedFilesList');
+
+      if (!files.length) { section.style.display = 'none'; return; }
+
+      section.style.display = 'block';
+      list.innerHTML = files.map(f => `
+        <div style="display:flex; justify-content:space-between; align-items:center;
+                    padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
+          <span>📄 ${f}</span>
+          <button class="small danger" onclick="deleteUploadedFile('${f}')">Delete</button>
+        </div>`).join('');
+    }
+
+    async function deleteUploadedFile(filename) {
+      const res = await fetch('/api/upload/files/' + encodeURIComponent(filename),
+                              { method: 'DELETE', headers: authHeaders() });
+      if (!res.ok) { showToast('Could not delete file'); return; }
+      showToast(`${filename} deleted`);
+      await loadUploadedFiles();
+      await loadImportedData();
+      await loadRecommendation();
+    }
+
+    // ── Imported data preview ──────────────────────────────────────────── //
+
+    async function loadImportedData() {
+      // Fetch both income and transactions from file store (MCP tools)
+      const [incRes, txnRes] = await Promise.all([
+        noStoreFetch('/api/upload/files', { headers: authHeaders() }),
+      ]);
+
+      // We'll use the summary endpoint via a separate backend call — but since
+      // we don't have a dedicated "file data" API endpoint, we read the
+      // recommendation totals bar instead. For the preview table, call the
+      // MCP summary via the existing /api/recommend path isn't ideal.
+      // Instead: load the uploaded files list; if files exist show a note.
+      // Full preview requires a new endpoint — skip detailed preview for now,
+      // show count only via the totals bar in loadRecommendation.
+      const section = document.getElementById('importedDataSection');
+      section.style.display = 'none'; // hidden until a dedicated endpoint is added
+    }
+
+    // ── loadRecommendation — main entry point ──────────────────────────── //
 
     async function loadRecommendation() {
-      // Cancel the entire previous run (list fetches + recommend fetch).
       if (recoAbortCtrl) recoAbortCtrl.abort();
       recoAbortCtrl = new AbortController();
       const signal = recoAbortCtrl.signal;
 
       const container = document.getElementById('recoContent');
       const totalsBar = document.getElementById('totalsBar');
-
       container.innerHTML = '<p class="empty-state" style="color:var(--muted);">Calculating…</p>';
 
-      // Step 1 — fetch income + transactions in parallel, both cancellable.
+      // Fetch DB lists + uploaded files list in parallel
       try {
         await Promise.all([
           _fetchAndRenderIncome(signal),
           _fetchAndRenderTransactions(signal),
+          loadUploadedFiles(),
         ]);
       } catch (e) {
-        if (e.name === 'AbortError') return;   // newer call took over — exit silently
-        if (e.message === 'auth') return;       // already redirected to login
+        if (e.name === 'AbortError') return;
+        if (e.message === 'auth') return;
         container.innerHTML = '<p class="empty-state">Could not load your data. Please try again.</p>';
         return;
       }
 
-      // Step 2 — compute totals from the fresh snapshots.
-      const totalIncome   = currentIncome.reduce((sum, i) => sum + i.amount, 0);
-      const totalExpenses = currentTxns.reduce((sum, t)   => sum + t.amount, 0);
+      const totalIncome   = currentIncome.reduce((s, i) => s + i.amount, 0);
+      const totalExpenses = currentTxns.reduce((s, t)   => s + t.amount, 0);
 
-      totalsBar.innerText = (totalIncome > 0 || totalExpenses > 0)
-        ? `Total income: ₹${totalIncome.toLocaleString('en-IN')}  •  Total expenses: ₹${totalExpenses.toLocaleString('en-IN')}`
+      totalsBar.innerHTML = (totalIncome > 0 || totalExpenses > 0)
+        ? `<span>Income (manual): <strong>${inr(totalIncome)}</strong></span>
+           &nbsp;•&nbsp;
+           <span>Expenses (manual): <strong>${inr(totalExpenses)}</strong></span>`
         : '';
 
-      // Step 3 — nothing to recommend yet.
       if (totalIncome === 0 && totalExpenses === 0) {
-        container.innerHTML = '<p class="empty-state">Add income and transactions above, then click "Refresh recommendation."</p>';
+        container.innerHTML = '<p class="empty-state">Add income and transactions above to get a recommendation.</p>';
         return;
       }
 
-      // Step 4 — call /api/recommend, also cancellable.
+      // Call /api/recommend
       let res;
       try {
-        res = await fetch('/api/recommend?_=' + Date.now(), {
-          headers: authHeaders(),
-          cache: 'no-store',
-          signal,
-        });
+        res = await fetch('/api/recommend?_=' + Date.now(),
+                          { headers: authHeaders(), cache: 'no-store', signal });
       } catch (e) {
         if (e.name === 'AbortError') return;
         container.innerHTML = '<p class="empty-state">Network error — please try again.</p>';
         return;
       }
-
       if (res.status === 401) return logout();
 
       const data = await res.json();
-
       if (!res.ok) {
         container.innerHTML = `<p class="empty-state">${data.detail || 'Could not generate a recommendation yet.'}</p>`;
         return;
       }
 
-      // ---- Overspending / breakeven ----
-      if (data.status === 'overspending' || data.status === 'breakeven') {
-        const colour = data.status === 'overspending' ? 'var(--red)' : 'var(--gold)';
+      _renderRecommendation(data);
+    }
+
+    function _renderRecommendation(data) {
+      const container = document.getElementById('recoContent');
+
+      // ── Overspending ──
+      if (data.status === 'overspending') {
         container.innerHTML = `
-          <div style="border-left:3px solid ${colour}; padding-left:14px; font-size:14px; line-height:1.7; color:var(--ink);">
-            ${data.reasoning.map(r => `<p style="margin:0 0 8px;">${r}</p>`).join('')}
+          <div style="border-left:3px solid var(--red); padding-left:14px;">
+            <div style="font-weight:600; color:var(--red); margin-bottom:8px;">⚠️ Spending exceeds income</div>
+            ${data.reasoning.map(r => `<p style="font-size:14px; margin:0 0 8px; line-height:1.6;">${r}</p>`).join('')}
           </div>`;
         return;
       }
 
-      // ---- Normal allocation ----
+      // ── Below threshold ──
+      if (data.status === 'below_threshold') {
+        container.innerHTML = `
+          <div style="border-left:3px solid var(--gold); padding-left:14px;">
+            <div style="font-weight:600; color:var(--gold); margin-bottom:8px;">💡 Keep building your savings</div>
+            ${data.reasoning.map(r => `<p style="font-size:14px; margin:0 0 8px; line-height:1.6;">${r}</p>`).join('')}
+          </div>`;
+        return;
+      }
+
+      // ── Healthy allocation ──
       const eqEnd   = data.equity_pct;
-      const debtEnd = eqEnd   + data.debt_pct;
+      const debtEnd = eqEnd + data.debt_pct;
       const goldEnd = debtEnd + data.gold_pct;
 
       container.innerHTML = `
         <div class="allocation-layout">
           <div class="donut-wrap">
             <div class="donut" style="--eq-end:${eqEnd}%; --debt-end:${debtEnd}%; --gold-end:${goldEnd}%;"></div>
-            <div class="donut-center">${data.equity_pct}%\nEquity</div>
+            <div class="donut-center">${data.equity_pct}%<br>Equity</div>
           </div>
           <div class="legend">
             <div class="row"><span class="dot" style="background:#1F6F54"></span><span class="label">Equity</span><span class="value">${data.equity_pct}%</span></div>
@@ -409,9 +439,7 @@
         </ul>`;
     }
 
-    // ------------------------------------------------------------------ //
-    //  File Upload
-    // ------------------------------------------------------------------ //
+    // ── File upload ────────────────────────────────────────────────────── //
 
     function handleDrop(event) {
       event.preventDefault();
@@ -424,11 +452,10 @@
 
     async function uploadFile(file) {
       if (!file) return;
-
       const status = document.getElementById('uploadStatus');
       const zone   = document.getElementById('dropZone');
 
-      status.innerHTML = '<span style="color:var(--muted);">⏳ Uploading…</span>';
+      status.innerHTML = '<span style="color:var(--muted);">⏳ Uploading and parsing…</span>';
       zone.style.pointerEvents = 'none';
 
       const form = new FormData();
@@ -448,25 +475,23 @@
       }
 
       zone.style.pointerEvents = '';
-      document.getElementById('fileInput').value = '';  // reset picker
+      document.getElementById('fileInput').value = '';
 
       const data = await res.json();
-
       if (!res.ok) {
         status.innerHTML = `<span style="color:var(--red);">❌ ${data.detail || 'Upload failed.'}</span>`;
         return;
       }
 
-      status.innerHTML = `<span style="color:var(--green);">✅ ${data.message}</span>`;
+      status.innerHTML = `<span style="color:var(--green);">
+        ✅ ${data.message}
+        (${data.income_count} income, ${data.expense_count} expense rows)
+      </span>`;
       showToast(data.message);
-
-      // Refresh recommendation to include newly uploaded transactions.
       await loadRecommendation();
     }
 
-    // ------------------------------------------------------------------ //
-    //  Initialise
-    // ------------------------------------------------------------------ //
+    // ── Init ───────────────────────────────────────────────────────────── //
     loadProfile();
     loadRecommendation();
   </script>

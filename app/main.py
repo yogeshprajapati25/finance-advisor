@@ -24,7 +24,7 @@ from app.core.models import (
 from app.core.allocation import suggest_allocation
 from app.core.spending import calculate_spending_summary
 from app.core.security import hash_password, verify_password, create_access_token, get_current_user
-from app.core.parsers import parse_file, save_to_user_folder
+from app.core.parsers import parse_file, save_to_user_folder, list_user_files, delete_user_file
 from app.core.mcp_client import fetch_file_transactions, fetch_file_income
 
 app = FastAPI(title="Personal Finance Advisor")
@@ -313,6 +313,7 @@ def delete_income(
 
 ALLOWED_TYPES = {".csv", ".xlsx", ".xls", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
+
 @app.post("/api/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -324,18 +325,49 @@ async def upload_file(
 
     content = await file.read()
     try:
-        transactions = parse_file(file.filename, content)
+        income, expenses = parse_file(file.filename, content)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Could not parse file: {e}")
 
-    if not transactions:
-        raise HTTPException(status_code=422, detail="No transactions found in file.")
+    if not income and not expenses:
+        raise HTTPException(status_code=422, detail="No data found in file.")
 
-    saved_path = save_to_user_folder(current_user.id, transactions, INPUT_DATA_DIR)
+    result = save_to_user_folder(
+        user_id=current_user.id,
+        filename=file.filename,
+        income=income,
+        expenses=expenses,
+        raw_content=content,
+        base=INPUT_DATA_DIR,
+    )
     return {
-        "message": f"{len(transactions)} transaction(s) imported.",
-        "saved_to": str(saved_path),
+        "message": (
+            f"Imported {result['income_count']} income row(s) and "
+            f"{result['expense_count']} expense row(s)."
+        ),
+        "income_count":   result["income_count"],
+        "expense_count":  result["expense_count"],
+        "saved_filename": result["saved_filename"],
     }
+
+
+@app.get("/api/upload/files")
+def get_uploaded_files(current_user: UserDB = Depends(get_current_user)):
+    """List all uploaded files for the current user."""
+    files = list_user_files(current_user.id, INPUT_DATA_DIR)
+    return {"files": files}
+
+
+@app.delete("/api/upload/files/{filename}")
+def delete_uploaded_file(
+    filename: str,
+    current_user: UserDB = Depends(get_current_user),
+):
+    """Delete an uploaded file and rebuild the user's data stores."""
+    deleted = delete_user_file(current_user.id, filename, INPUT_DATA_DIR)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="File not found.")
+    return {"message": f"{filename} deleted and data stores updated."}
 
 
 # ---- Recommendation ----
@@ -379,22 +411,18 @@ def recommend_for_user(
     ]
     total_income = sum(i.amount for i in income_sources)
 
-    # ── Merge with MCP file-based data ───────────────────────────────────────
-    # Transactions and income uploaded via file (CSV/PDF/image) are stored in
-    # input_data/user_{id}/ by the MCP server tools.  We merge them here so
-    # the recommendation reflects BOTH manually entered data and uploaded files.
+    # ── Merge file-uploaded data (via MCP tools) ─────────────────────────────
     try:
-        file_txns = fetch_file_transactions(current_user.id)
-        file_income = fetch_file_income(current_user.id)
-        for ft in file_txns:
-            txn_schemas.append(
-                TransactionSchema(
-                    category=ft.get("category", "Other"),
-                    amount=float(ft.get("amount", 0)),
-                    description=ft.get("description", ""),
-                )
-            )
-        total_income += sum(float(fi.get("amount", 0)) for fi in file_income)
+        for ft in fetch_file_transactions(current_user.id):
+            txn_schemas.append(TransactionSchema(
+                category=ft.get("category", "Other"),
+                amount=float(ft.get("amount", 0)),
+                description=ft.get("description", ""),
+            ))
+        total_income += sum(
+            float(fi.get("amount", 0))
+            for fi in fetch_file_income(current_user.id)
+        )
     except Exception:
         pass  # file data is optional — never break recommendations
     # ─────────────────────────────────────────────────────────────────────────
@@ -402,8 +430,9 @@ def recommend_for_user(
     if not txn_schemas and total_income == 0:
         raise HTTPException(
             status_code=400,
-            detail="Add at least one income source or transaction for this month to get a recommendation.",
+            detail="Add at least one income source or transaction to get a recommendation.",
         )
+
     summary = calculate_spending_summary(txn_schemas, total_income)
 
     profile = UserProfile(
@@ -413,7 +442,11 @@ def recommend_for_user(
         dependents=current_user.dependents,
         has_emergency_fund=current_user.has_emergency_fund,
     )
-    return suggest_allocation(profile, savings_rate_override=summary.savings_rate)
+    return suggest_allocation(
+        profile,
+        savings_rate_override=summary.savings_rate,
+        category_breakdown=summary.category_breakdown,
+    )
 
 
 # ---- Stateless recommend (kept for testing/demo without auth) ----
