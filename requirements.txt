@@ -17,8 +17,9 @@ Pillow==10.4.0
 pluggy==1.5.0
 psycopg2-binary==2.9.10
 pyasn1==0.6.1
-pydantic==2.11.3
-pydantic_core==2.33.1
+pydantic==2.12.4
+pydantic_core==2.33.4
+pydantic-settings==2.15.0
 Pygments==2.19.1
 pytest==8.3.5
 pytesseract==0.3.13
